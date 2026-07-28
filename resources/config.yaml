@@ -1,11 +1,11 @@
-task: detection  # ["classification", "detection"]
+task: classification  # ["classification", "detection"]
 
 classification:
   n_classes: 101
   smoothing: 1e-5
   trust_threshold: 0.999
   use_majority_vote: false
-  predictions_path: 'C:\Users\skasay\Desktop\food101n_dataset\noisy_shuffled\swin_food101n_probabilities.csv'
+  predictions_path: 'data/datasets/classification/food101n_dataset/noisy_shuffled/swin_food101n_probabilities.csv'
 
 detection:
   n_classes: 14
@@ -15,8 +15,8 @@ detection:
   use_recall_weight: true
   use_entropy_modulation: true
   use_spatial_bias: true
-  predictions_path: 'C:\Users\skasay\Desktop\food101n_dataset\noisy_shuffled\swin_food101n_probabilities.csv'
+  predictions_path: 'data/datasets/detection/VinDR-CXR/model_predictions.jsonl'
 
-annotations_path: 'D:\jetbra_cr\projects\new_project\EnhancedCEWA\data\food101N_annotation_df.csv'
-output_dir: 'D:\jetbra_cr\projects\new_project\EnhancedCEWA\data\output'
+annotations_path: 'data/datasets/classification/food101n_dataset/food101N_annotation_df.csv'
+output_dir: 'data/output/classification'
 verbose: true

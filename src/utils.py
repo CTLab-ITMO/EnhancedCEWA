@@ -44,15 +44,6 @@ def build_iou_matrix(bboxes):
 
 
 def greedy_cluster(iou_mat, thresh=0.5):
-    """
-    Greedy clustering based on IoU matrix.
-
-    Args:
-        iou_mat: numpy.ndarray shape (n, n) IoU matrix
-        thresh: float, IoU threshold
-    Returns:
-        list of lists: each inner list contains indices of boxes in a cluster
-    """
     n = len(iou_mat)
     used = [False] * n
     clusters = []
@@ -82,29 +73,11 @@ def greedy_cluster(iou_mat, thresh=0.5):
 
 
 def weighted_average_bbox(bboxes, weights):
-    """
-    Weighted average of bounding boxes.
-
-    Args:
-        bboxes: list of boxes, each box is [x1,y1,x2,y2]
-        weights: list of floats, weights for each box
-    Returns:
-        list of 4 floats: averaged box
-    """
     weights = np.array(weights)
     return np.average(bboxes, axis=0, weights=weights).tolist()
 
 
 def weighted_vote_class(classes, weights):
-    """
-    Weighted majority vote for class labels.
-
-    Args:
-        classes: list of ints
-        weights: list of floats
-    Returns:
-        int: class with maximum total weight
-    """
     wc = {}
     for cls, w in zip(classes, weights):
         wc[cls] = wc.get(cls, 0.0) + w

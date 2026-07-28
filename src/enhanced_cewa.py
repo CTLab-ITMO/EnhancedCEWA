@@ -89,6 +89,71 @@ class ClassificationCEWA(EnhancedCEWA):
         logger.info("ClassificationCEWA metrics computed")
         return self
 
+    def predict_consensus(self, annotations, model_probs):
+        """
+        Predict consensus labels.
+
+        Args:
+            annotations: pandas DataFrame or numpy array of shape (n_examples, n_annotators)
+            model_probs: numpy array of shape (n_examples, n_classes)
+        Returns:
+            consensus_labels: numpy array of shape (n_examples,)
+            quality_scores: numpy array of shape (n_examples,)
+            consensus_probs: numpy array of shape (n_examples, n_classes)
+        """
+        if self.use_majority_vote:
+            return self._predict_majority_vote(annotations)
+
+        ann_np = self._to_numpy(annotations)
+        n_ex, n_ann = ann_np.shape
+        K = self.n_classes
+        cons_probs = np.zeros((n_ex, K))
+
+        model_entropy = entropy(model_probs.T)
+        scaling = (1 - (model_entropy / np.log(K)))[:, np.newaxis]
+        model_conf = scaling * self.class_reliability
+
+        for i in tqdm(range(n_ex), desc="calculating better labels"):
+            annotators = [j for j in range(n_ann) if not np.isnan(ann_np[i, j])]
+            if annotators:
+                cons_probs[i] = self._aggregate_single_example(
+                    i, ann_np, model_probs, model_conf, annotators
+                )
+            else:
+                cons_probs[i] = model_probs[i]
+
+        cons_labels = np.argmax(cons_probs, axis=1)
+        quality = cons_probs[np.arange(n_ex), cons_labels]
+        return cons_labels, quality, cons_probs
+
+    def score_annotators(self, annotations, model_probs=None):
+        """
+        Compute annotator quality scores.
+
+        Args:
+            annotations: pandas DataFrame or numpy array of shape (n_examples, n_annotators)
+            model_probs: not used (kept for API consistency)
+        Returns:
+            numpy array of shape (n_annotators,)
+        """
+        if self.use_majority_vote:
+            return np.zeros(self._to_numpy(annotations).shape[1])
+
+        ann_np = self._to_numpy(annotations)
+        n_ann = ann_np.shape[1]
+        scores = np.zeros(n_ann)
+
+        for j in range(n_ann):
+            valid = ~np.isnan(ann_np[:, j])
+            if not np.any(valid):
+                continue
+            labels = ann_np[valid, j].astype(int)
+            expertise = np.mean([self.annotator_expertise[j, c] for c in labels])
+            agreement = np.mean([self.annotator_agreement[j, c] for c in labels])
+            scores[j] = 0.3 * expertise + 0.7 * agreement
+
+        return scores
+
     def _to_numpy(self, data):
         if hasattr(data, 'to_numpy'):
             return data.to_numpy(dtype=float)
@@ -152,43 +217,6 @@ class ClassificationCEWA(EnhancedCEWA):
         global_agr = np.mean(self.annotator_agreement[self.annotator_agreement > 0])
         self.annotator_agreement = np.where(self.annotator_agreement == 0, global_agr, self.annotator_agreement)
 
-    def predict_consensus(self, annotations, model_probs):
-        """
-        Predict consensus labels.
-
-        Args:
-            annotations: pandas DataFrame or numpy array of shape (n_examples, n_annotators)
-            model_probs: numpy array of shape (n_examples, n_classes)
-        Returns:
-            consensus_labels: numpy array of shape (n_examples,)
-            quality_scores: numpy array of shape (n_examples,)
-            consensus_probs: numpy array of shape (n_examples, n_classes)
-        """
-        if self.use_majority_vote:
-            return self._predict_majority_vote(annotations)
-
-        ann_np = self._to_numpy(annotations)
-        n_ex, n_ann = ann_np.shape
-        K = self.n_classes
-        cons_probs = np.zeros((n_ex, K))
-
-        model_entropy = entropy(model_probs.T)
-        scaling = (1 - (model_entropy / np.log(K)))[:, np.newaxis]
-        model_conf = scaling * self.class_reliability
-
-        for i in tqdm(range(n_ex), desc="calculating better labels"):
-            annotators = [j for j in range(n_ann) if not np.isnan(ann_np[i, j])]
-            if annotators:
-                cons_probs[i] = self._aggregate_single_example(
-                    i, ann_np, model_probs, model_conf, annotators
-                )
-            else:
-                cons_probs[i] = model_probs[i]
-
-        cons_labels = np.argmax(cons_probs, axis=1)
-        quality = cons_probs[np.arange(n_ex), cons_labels]
-        return cons_labels, quality, cons_probs
-
     def _aggregate_single_example(self, i, ann_np, model_probs, model_conf, annotators):
         K = self.n_classes
         ann_contrib = np.zeros(K)
@@ -226,34 +254,6 @@ class ClassificationCEWA(EnhancedCEWA):
         cons_probs = np.eye(self.n_classes)[cons_labels]
         quality = np.ones(n_ex)
         return cons_labels, quality, cons_probs
-
-    def score_annotators(self, annotations, model_probs=None):
-        """
-        Compute annotator quality scores.
-
-        Args:
-            annotations: pandas DataFrame or numpy array of shape (n_examples, n_annotators)
-            model_probs: not used (kept for API consistency)
-        Returns:
-            numpy array of shape (n_annotators,)
-        """
-        if self.use_majority_vote:
-            return np.zeros(self._to_numpy(annotations).shape[1])
-
-        ann_np = self._to_numpy(annotations)
-        n_ann = ann_np.shape[1]
-        scores = np.zeros(n_ann)
-
-        for j in range(n_ann):
-            valid = ~np.isnan(ann_np[:, j])
-            if not np.any(valid):
-                continue
-            labels = ann_np[valid, j].astype(int)
-            expertise = np.mean([self.annotator_expertise[j, c] for c in labels])
-            agreement = np.mean([self.annotator_agreement[j, c] for c in labels])
-            scores[j] = 0.3 * expertise + 0.7 * agreement
-
-        return scores
 
 
 class DetectionCEWA(EnhancedCEWA):
@@ -318,10 +318,8 @@ class DetectionCEWA(EnhancedCEWA):
         self._init_metrics()
 
         grouped = df.groupby('image_id')
-        if verbose:
-            logger.info("Collecting statistics for annotator metrics...")
 
-        for _, group in grouped:
+        for _, group in tqdm(grouped, "Collecting statistics for annotator metrics..."):
             ann_items = self._extract_ann_items(group)
             if not ann_items:
                 continue
@@ -338,6 +336,55 @@ class DetectionCEWA(EnhancedCEWA):
 
         logger.info("DetectionCEWA metrics computed")
         return self
+
+    def predict_consensus(self, annotations_df, model_predictions=None, verbose=False):
+        """
+        Aggregate annotations for all images.
+
+        Args:
+            annotations_df: pandas DataFrame with columns:
+                image_id, class_id, rad_id, x_min, y_min, x_max, y_max
+            model_predictions: dict {image_id: list of pred dicts with keys:
+                'bbox', 'class', 'confidence', 'class_probs'}
+            verbose: bool, enable progress bar
+        Returns:
+            pandas DataFrame with columns: image_id, class_id, x_min, y_min, x_max, y_max
+        """
+        if self.use_majority_vote:
+            return self._predict_majority_vote(annotations_df)
+
+        df = self._clean_data(annotations_df)
+        grouped = df.groupby('image_id')
+        all_consensus = []
+
+        for image_id, group in tqdm(grouped, desc="Aggregating images..."):
+            model_preds = model_predictions.get(image_id, []) if model_predictions else []
+            objs = self._aggregate_image(image_id, group, model_preds)
+            all_consensus.extend(objs)
+
+        return pd.DataFrame(all_consensus)
+
+    def score_annotators(self, annotations_df=None, model_probs=None):
+        """
+        Compute annotator quality scores.
+
+        Args:
+            annotations_df: not used (kept for API consistency)
+            model_probs: not used
+        Returns:
+            numpy array of shape (n_annotators,)
+        """
+        if self.use_majority_vote:
+            return np.zeros(len(self.annotator_ids or []))
+
+        n_ann = len(self.annotator_ids)
+        scores = np.zeros(n_ann)
+        for idx in range(n_ann):
+            avg_exp = np.mean(self.class_expertise[idx, :] * self.loc_expertise[idx, :])
+            avg_agr = np.mean(self.class_agreement[idx, :] * self.loc_agreement[idx, :])
+            avg_rec = np.mean(self.recall[idx, :])
+            scores[idx] = 0.4 * avg_exp + 0.3 * avg_agr + 0.3 * avg_rec
+        return scores
 
     def _clean_data(self, df):
         return df[df['class_id'] < self.n_classes].copy()
@@ -464,36 +511,6 @@ class DetectionCEWA(EnhancedCEWA):
             return np.ones(self.n_classes) * 0.8
         return np.ones(self.n_classes) * 0.8
 
-    def predict_consensus(self, annotations_df, model_predictions=None, verbose=False):
-        """
-        Aggregate annotations for all images.
-
-        Args:
-            annotations_df: pandas DataFrame with columns:
-                image_id, class_id, rad_id, x_min, y_min, x_max, y_max
-            model_predictions: dict {image_id: list of pred dicts with keys:
-                'bbox', 'class', 'confidence', 'class_probs'}
-            verbose: bool, enable progress bar
-        Returns:
-            pandas DataFrame with columns: image_id, class_id, x_min, y_min, x_max, y_max
-        """
-        if self.use_majority_vote:
-            return self._predict_majority_vote(annotations_df)
-
-        df = self._clean_data(annotations_df)
-        grouped = df.groupby('image_id')
-        all_consensus = []
-
-        if verbose:
-            logger.info("Aggregating images...")
-
-        for image_id, group in grouped:
-            model_preds = model_predictions.get(image_id, []) if model_predictions else []
-            objs = self._aggregate_image(image_id, group, model_preds)
-            all_consensus.extend(objs)
-
-        return pd.DataFrame(all_consensus)
-
     def _aggregate_image(self, image_id, group, model_preds):
         ann_items = self._extract_ann_items(group)
         if not ann_items:
@@ -593,25 +610,3 @@ class DetectionCEWA(EnhancedCEWA):
                     'y_max': cons_bbox[3]
                 })
         return pd.DataFrame(results)
-
-    def score_annotators(self, annotations_df=None, model_probs=None):
-        """
-        Compute annotator quality scores.
-
-        Args:
-            annotations_df: not used (kept for API consistency)
-            model_probs: not used
-        Returns:
-            numpy array of shape (n_annotators,)
-        """
-        if self.use_majority_vote:
-            return np.zeros(len(self.annotator_ids or []))
-
-        n_ann = len(self.annotator_ids)
-        scores = np.zeros(n_ann)
-        for idx in range(n_ann):
-            avg_exp = np.mean(self.class_expertise[idx, :] * self.loc_expertise[idx, :])
-            avg_agr = np.mean(self.class_agreement[idx, :] * self.loc_agreement[idx, :])
-            avg_rec = np.mean(self.recall[idx, :])
-            scores[idx] = 0.4 * avg_exp + 0.3 * avg_agr + 0.3 * avg_rec
-        return scores
