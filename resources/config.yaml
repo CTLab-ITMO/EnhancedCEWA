@@ -1,0 +1,22 @@
+task: detection  # ["classification", "detection"]
+
+classification:
+  n_classes: 101
+  smoothing: 1e-5
+  trust_threshold: 0.999
+  use_majority_vote: false
+  predictions_path: 'C:\Users\skasay\Desktop\food101n_dataset\noisy_shuffled\swin_food101n_probabilities.csv'
+
+detection:
+  n_classes: 14
+  iou_threshold: 0.5
+  trust_threshold: 0.999
+  use_majority_vote: false
+  use_recall_weight: true
+  use_entropy_modulation: true
+  use_spatial_bias: true
+  predictions_path: 'C:\Users\skasay\Desktop\food101n_dataset\noisy_shuffled\swin_food101n_probabilities.csv'
+
+annotations_path: 'D:\jetbra_cr\projects\new_project\EnhancedCEWA\data\food101N_annotation_df.csv'
+output_dir: 'D:\jetbra_cr\projects\new_project\EnhancedCEWA\data\output'
+verbose: true
