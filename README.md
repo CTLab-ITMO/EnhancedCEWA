@@ -171,3 +171,5 @@ Below is the complete list of all configuration parameters available in the `res
 | `use_recall_weight` | Detection | bool | `true` | Enable recall-aware weighting: penalizes annotators who miss objects |
 | `use_entropy_modulation` | Detection | bool | `true` | Enable spatial entropy modulation: reduces model influence when localization is unstable |
 | `use_spatial_bias` | Detection | bool | `true` | Enable spatial bias calibration: corrects systematic box shifts per annotator |
+
+# [See more examples in notebooks section](notebooks)
